@@ -4,6 +4,7 @@ import { Menu, Clock, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { cn } from "@/lib/utils"
+import { useEffect, useState } from "react"
 
 interface PlexTopNavProps {
   activeTab: string
@@ -19,7 +20,14 @@ const topNavItems = [
 ]
 
 export function PlexTopNav({ activeTab, onTabSelect, onMenuToggle }: PlexTopNavProps) {
-  const currentTime = new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+  const [currentTime, setCurrentTime] = useState("")
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setCurrentTime(new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }))
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [])
 
   return (
     <header className="relative z-20 bg-black/80 backdrop-blur-md border-b border-gray-800">
