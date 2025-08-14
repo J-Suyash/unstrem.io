@@ -6,6 +6,7 @@ use tauri::Manager;
 use directories::ProjectDirs;
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use raw_window_handle::{HasWindowHandle, RawWindowHandle, WindowHandle};
 
 mod player;
 mod locale_guard;
@@ -176,7 +177,8 @@ async fn get_streams(id: String, r#type: String) -> Result<serde_json::Value, St
 
 #[tauri::command]
 fn play_video(state: tauri::State<AppState>, url: String) -> Result<(), String> {
-    state.player.load(url, None)
+    // Deprecated in favor of HTML5 element playback; keep for compatibility but no-op
+    let _ = state; let _ = url; Ok(())
 }
 
 #[derive(Clone)]
@@ -261,12 +263,42 @@ fn player_screenshot(state: tauri::State<AppState>, file: String, include_subs: 
 }
 
 pub fn run() {
+  // Prefer X11 backend on Linux so mpv can embed via Xlib when running under Wayland
+  #[cfg(target_os = "linux")]
+  {
+    use std::env;
+    let session = env::var("XDG_SESSION_TYPE").unwrap_or_default();
+    let wayland_display = env::var("WAYLAND_DISPLAY").unwrap_or_default();
+    if session.eq_ignore_ascii_case("wayland") || !wayland_display.is_empty() {
+      // Set before winit initializes
+      env::set_var("WINIT_UNIX_BACKEND", "x11");
+    }
+  }
+
   tauri::Builder::default()
     .setup(|app| {
       // Ensure LC_NUMERIC is C for libraries like mpv/FFmpeg on Linux
       unsafe { locale_guard::ensure_c_numeric_locale(); }
       // Initialize and manage a single persistent player instance
       let handle = player::spawn_player_service()?;
+      // Try to embed mpv into our main window (Tauri v2: WebviewWindow implements HasWindowHandle)
+      if let Some(window) = app.get_webview_window("main") {
+        if let Ok(wh) = window.window_handle() {
+          let raw: RawWindowHandle = wh.as_raw();
+          #[cfg(target_os = "windows")]
+          if let RawWindowHandle::Win32(h) = raw {
+            let _ = handle.set_wid((h.hwnd as isize) as i64);
+          }
+          #[cfg(target_os = "linux")]
+          if let RawWindowHandle::Xlib(h) = raw {
+            let _ = handle.set_wid(h.window as i64);
+          }
+          #[cfg(target_os = "macos")]
+          if let RawWindowHandle::AppKit(h) = raw {
+            let _ = handle.set_wid((h.ns_view as isize) as i64);
+          }
+        }
+      }
       let state = AppState { player: handle };
       app.manage(state);
       if cfg!(debug_assertions) {

@@ -16,8 +16,9 @@ impl VideoPlayer {
         let _ = mpv.set_property("demuxer-max-bytes", 128i64 * 1024 * 1024);
         let _ = mpv.set_property("demuxer-readahead-secs", 60);
         let _ = mpv.set_property("user-agent", "unstrem.io/1.0");
-        let _ = mpv.set_property("keep-open", "yes");
-        let _ = mpv.set_property("force-window", "yes");
+        let _ = mpv.set_property("keep-open", "no");
+        let _ = mpv.set_property("force-window", "no");
+        let _ = mpv.set_property("vo", "gpu");
         Ok(Self { mpv })
     }
 
@@ -39,6 +40,14 @@ impl VideoPlayer {
         self.mpv.command("stop", &[])?;
         // Reset properties that may affect next load
         let _ = self.mpv.set_property("pause", false);
+        Ok(())
+    }
+
+    fn set_wid(&self, wid: i64) -> Result<(), Box<dyn Error>> {
+        // Embed into the provided native window handle when supported
+        // Must be set before loadfile; set vo explicitly.
+        self.mpv.set_property("vo", "gpu")?;
+        self.mpv.set_property("wid", wid)?;
         Ok(())
     }
 
@@ -109,6 +118,7 @@ pub enum PlayerCommand {
     Load { url: String, start_time: Option<f64> },
     PauseToggle,
     Stop,
+    SetWid { wid: i64 },
     SeekRelative { seconds: f64 },
     SeekAbsolute { seconds: f64 },
     SetVolume { volume: f64 },
@@ -141,6 +151,12 @@ impl PlayerHandle {
 
     pub fn stop(&self) -> Result<(), String> {
         self.tx.send(PlayerCommand::Stop).map_err(|e| e.to_string())
+    }
+
+    pub fn set_wid(&self, wid: i64) -> Result<(), String> {
+        self.tx
+            .send(PlayerCommand::SetWid { wid })
+            .map_err(|e| e.to_string())
     }
 
     pub fn seek_relative(&self, seconds: f64) -> Result<(), String> {
@@ -235,6 +251,9 @@ pub fn spawn_player_service() -> Result<PlayerHandle, Box<dyn Error>> {
                     match cmd {
                         PlayerCommand::Load { url, start_time } => {
                             if let Err(e) = player.load(&url, start_time) { eprintln!("load error: {e}"); }
+                        }
+                        PlayerCommand::SetWid { wid } => {
+                            if let Err(e) = player.set_wid(wid) { eprintln!("set wid error: {e}"); }
                         }
                         PlayerCommand::PauseToggle => { if let Err(e) = player.pause_toggle() { eprintln!("pause error: {e}"); } }
                         PlayerCommand::Stop => { if let Err(e) = player.stop() { eprintln!("stop error: {e}"); } }

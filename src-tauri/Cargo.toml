@@ -29,5 +29,7 @@ tokio = { version = "1", features = ["full"] }
 directories = "5.0.1"
 libmpv2 = "5.0.1"
 libc = "0.2"
+base64 = "0.21"
+raw-window-handle = "0.6"
 
 
