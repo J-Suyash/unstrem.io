@@ -2,9 +2,13 @@ use dotenv::dotenv;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::HashMap;
+use tauri::Manager;
 use directories::ProjectDirs;
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+
+mod player;
+mod locale_guard;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 
@@ -143,7 +147,7 @@ async fn get_streams(id: String, r#type: String) -> Result<serde_json::Value, St
     })?;
 
     let url = format!(
-        "https://aiostreams-pot.alc.dpdns.org/stremio/{}/{}/stream/{}/{}.json",
+        "https://aiostreams-sonic.lolcathost.ovh/stremio/{}/{}/stream/{}/{}.json",
         uuid,
         encrypted_password,
         r#type,
@@ -170,9 +174,101 @@ async fn get_streams(id: String, r#type: String) -> Result<serde_json::Value, St
     Ok(json)
 }
 
+#[tauri::command]
+fn play_video(state: tauri::State<AppState>, url: String) -> Result<(), String> {
+    state.player.load(url, None)
+}
+
+#[derive(Clone)]
+struct AppState {
+    player: player::PlayerHandle,
+}
+
+#[tauri::command]
+fn player_load(state: tauri::State<AppState>, url: String, start_time: Option<f64>) -> Result<(), String> {
+    state.player.load(url, start_time)
+}
+
+#[tauri::command]
+fn player_pause_toggle(state: tauri::State<AppState>) -> Result<(), String> {
+    state.player.pause_toggle()
+}
+
+#[tauri::command]
+fn player_stop(state: tauri::State<AppState>) -> Result<(), String> {
+    state.player.stop()
+}
+
+#[tauri::command]
+fn player_seek_relative(state: tauri::State<AppState>, seconds: f64) -> Result<(), String> {
+    state.player.seek_relative(seconds)
+}
+
+#[tauri::command]
+fn player_seek_absolute(state: tauri::State<AppState>, seconds: f64) -> Result<(), String> {
+    state.player.seek_absolute(seconds)
+}
+
+#[tauri::command]
+fn player_position(state: tauri::State<AppState>) -> Result<f64, String> {
+    // Prevent IPC errors if player thread died; return a friendly error instead
+    state.player.position().map_err(|e| format!("player_position error: {e}"))
+}
+
+#[tauri::command]
+fn player_duration(state: tauri::State<AppState>) -> Result<f64, String> {
+    state.player.duration().map_err(|e| format!("player_duration error: {e}"))
+}
+
+#[tauri::command]
+fn player_set_volume(state: tauri::State<AppState>, volume: f64) -> Result<(), String> {
+    state.player.set_volume(volume)
+}
+
+#[tauri::command]
+fn player_get_volume(state: tauri::State<AppState>) -> Result<f64, String> {
+    state.player.get_volume().map_err(|e| format!("player_get_volume error: {e}"))
+}
+
+#[tauri::command]
+fn player_cycle_audio(state: tauri::State<AppState>) -> Result<(), String> {
+    state.player.cycle_audio()
+}
+
+#[tauri::command]
+fn player_cycle_subtitle(state: tauri::State<AppState>) -> Result<(), String> {
+    state.player.cycle_subtitle()
+}
+
+#[tauri::command]
+fn player_toggle_subtitle_visibility(state: tauri::State<AppState>) -> Result<(), String> {
+    state.player.toggle_subtitle_visibility()
+}
+
+#[tauri::command]
+fn player_set_audio_track(state: tauri::State<AppState>, track_id: i64) -> Result<(), String> {
+    state.player.set_audio_track(track_id)
+}
+
+#[tauri::command]
+fn player_set_subtitle_track(state: tauri::State<AppState>, track_id: i64) -> Result<(), String> {
+    state.player.set_subtitle_track(track_id)
+}
+
+#[tauri::command]
+fn player_screenshot(state: tauri::State<AppState>, file: String, include_subs: Option<bool>) -> Result<(), String> {
+    state.player.screenshot_to_file(file, include_subs.unwrap_or(true))
+}
+
 pub fn run() {
   tauri::Builder::default()
     .setup(|app| {
+      // Ensure LC_NUMERIC is C for libraries like mpv/FFmpeg on Linux
+      unsafe { locale_guard::ensure_c_numeric_locale(); }
+      // Initialize and manage a single persistent player instance
+      let handle = player::spawn_player_service()?;
+      let state = AppState { player: handle };
+      app.manage(state);
       if cfg!(debug_assertions) {
         app.handle().plugin(
           tauri_plugin_log::Builder::default()
@@ -182,8 +278,28 @@ pub fn run() {
       }
       Ok(())
     })
-    
-    .invoke_handler(tauri::generate_handler![get_trending_movies, get_streams, save_playback_session, get_playback_session])
+    .invoke_handler(tauri::generate_handler![
+      get_trending_movies,
+      get_streams,
+      save_playback_session,
+      get_playback_session,
+      play_video,
+      player_load,
+      player_pause_toggle,
+      player_stop,
+      player_seek_relative,
+      player_seek_absolute,
+      player_position,
+      player_duration,
+      player_set_volume,
+      player_get_volume,
+      player_cycle_audio,
+      player_cycle_subtitle,
+      player_toggle_subtitle_visibility,
+      player_set_audio_track,
+      player_set_subtitle_track,
+      player_screenshot,
+    ])
     .run(tauri::generate_context!())
     .expect("error while running tauri application");
 }

@@ -4,6 +4,7 @@ import { PlexContentGrid } from "@/components/plex-content-grid"
 import { Play, Info, Plus, ThumbsUp } from "lucide-react"
 import { useEffect, useState } from "react"
 import { invoke } from "@tauri-apps/api/core"
+import { resolveImageUrl } from "@/lib/utils"
 
 interface HomePageProps {
   onContentSelect: (content: any) => void
@@ -31,7 +32,7 @@ export function HomePage({ onContentSelect }: HomePageProps) {
           <div
             className="absolute inset-0 bg-cover bg-center"
             style={{
-              backgroundImage: `url(https://image.tmdb.org/t/p/w1280${heroMovie.backdrop_path})`,
+              backgroundImage: `url(${resolveImageUrl(heroMovie.backdrop_path, "w1280")})`,
             }}
           />
           <div className="absolute inset-0 bg-gradient-to-r from-black via-black/70 to-transparent" />

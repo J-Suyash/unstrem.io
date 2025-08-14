@@ -4,7 +4,7 @@ import { useState } from "react"
 import { ChevronLeft, ChevronRight, Star, Play } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { cn } from "@/lib/utils"
+import { cn, resolveImageUrl } from "@/lib/utils"
 
 interface ContentItem {
   id: string
@@ -55,7 +55,7 @@ export function PlexContentGrid({ category, onContentSelect, content }: PlexCont
                     )}
                   >
                     <img
-                      src={`https://image.tmdb.org/t/p/w500${item.poster_path}`}
+                      src={resolveImageUrl(item.poster_path, "w500")}
                       alt={item.title}
                       className="w-full h-full object-cover"
                       onError={(e) => {

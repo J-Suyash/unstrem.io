@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import {
   X,
   Play,
+  Pause,
   Check,
   Star,
   Download,
@@ -16,11 +17,18 @@ import {
   Users,
   ArrowLeft,
   Menu,
+  ChevronLeft,
+  ChevronRight,
+  Camera,
+  Captions,
+  Volume2,
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { PlexSidebar } from "./plex-sidebar"
+import { resolveImageUrl } from "@/lib/utils"
 import { invoke } from "@tauri-apps/api/core"
+import { Slider } from "@/components/ui/slider"
 
 interface ContentItem {
   id: string
@@ -44,6 +52,41 @@ export function PlexPreviewPanel({ content, onClose }: PlexPreviewPanelProps) {
   const [selectedStreamUrl, setSelectedStreamUrl] = useState<string | null>(null)
   const [currentTime, setCurrentTime] = useState("")
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [paused, setPaused] = useState(false)
+  const [position, setPosition] = useState(0)
+  const [duration, setDuration] = useState(0)
+  const [volume, setVolume] = useState(100)
+  
+  useEffect(() => {
+    if (!selectedStreamUrl) return
+    let mounted = true
+    const init = async () => {
+      try {
+        const vol = await invoke<number>("player_get_volume")
+        if (mounted && typeof vol === "number") setVolume(Math.round(vol))
+        const dur = await invoke<number>("player_duration")
+        if (mounted && typeof dur === "number" && isFinite(dur)) setDuration(dur)
+      } catch (e) {
+        // noop
+      }
+    }
+    init()
+
+    const id = setInterval(async () => {
+      try {
+        const pos = await invoke<number>("player_position")
+        if (mounted && typeof pos === "number" && isFinite(pos)) setPosition(pos)
+        const dur = await invoke<number>("player_duration")
+        if (mounted && typeof dur === "number" && isFinite(dur)) setDuration(dur)
+      } catch (e) {
+        // noop
+      }
+    }, 500)
+    return () => {
+      mounted = false
+      clearInterval(id)
+    }
+  }, [selectedStreamUrl])
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -72,6 +115,7 @@ export function PlexPreviewPanel({ content, onClose }: PlexPreviewPanelProps) {
   const handleStreamSelect = (stream: any) => {
     setSelectedStreamUrl(stream.url)
     setShowStreamOptions(false)
+    invoke("player_load", { url: stream.url, start_time: 0 }).catch(console.error)
   }
 
   const renderMovieContent = () => (
@@ -79,7 +123,7 @@ export function PlexPreviewPanel({ content, onClose }: PlexPreviewPanelProps) {
       <div
         className="absolute inset-0 bg-cover bg-center bg-no-repeat"
         style={{
-          backgroundImage: `url(https://image.tmdb.org/t/p/w1280${content.backdrop_path})`,
+          backgroundImage: `url(${resolveImageUrl(content.backdrop_path, "w1280")})`,
         }}
       >
         <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/50 to-transparent" />
@@ -207,15 +251,126 @@ export function PlexPreviewPanel({ content, onClose }: PlexPreviewPanelProps) {
       />
       {selectedStreamUrl ? (
         <div className="relative flex-1 bg-black flex items-center justify-center">
-          <video controls autoPlay src={selectedStreamUrl} className="w-full h-full object-contain" />
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={() => setSelectedStreamUrl(null)}
-            className="absolute top-6 left-6 text-white hover:bg-white/20 rounded-full p-3 transition-all duration-200 hover:scale-110 z-50"
-          >
-            <ArrowLeft className="h-6 w-6" />
-          </Button>
+          {/* mpv renders in its own window; this pane serves as remote controls */}
+          <div className="absolute inset-0 flex flex-col items-center justify-end p-6 pointer-events-none">
+            <div className="w-full max-w-4xl bg-black/60 backdrop-blur-md rounded-xl p-4 space-y-3 pointer-events-auto">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-white hover:bg-white/20 rounded-full w-10 h-10"
+                    onClick={async () => {
+                      await invoke("player_seek_relative", { seconds: -10 })
+                    }}
+                  >
+                    <ChevronLeft className="h-5 w-5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-white hover:bg-white/20 rounded-full w-12 h-12"
+                    onClick={async () => {
+                      await invoke("player_pause_toggle")
+                      setPaused((p) => !p)
+                    }}
+                  >
+                    {paused ? <Play className="h-6 w-6 ml-0.5" /> : <Pause className="h-6 w-6" />}
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-white hover:bg-white/20 rounded-full w-10 h-10"
+                    onClick={async () => {
+                      await invoke("player_seek_relative", { seconds: 10 })
+                    }}
+                  >
+                    <ChevronRight className="h-5 w-5" />
+                  </Button>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-white hover:bg-white/20 rounded-full w-10 h-10"
+                    onClick={async () => {
+                      await invoke("player_cycle_audio")
+                    }}
+                  >
+                    <Volume2 className="h-5 w-5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-white hover:bg-white/20 rounded-full w-10 h-10"
+                    onClick={async () => {
+                      await invoke("player_cycle_subtitle")
+                    }}
+                  >
+                    <Captions className="h-5 w-5" />
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="text-white hover:bg-white/20 rounded-full w-10 h-10"
+                    onClick={async () => {
+                      const ts = Date.now()
+                      await invoke("player_screenshot", { file: `/tmp/unstrem-shot-${ts}.png`, include_subs: true })
+                    }}
+                  >
+                    <Camera className="h-5 w-5" />
+                  </Button>
+                </div>
+              </div>
+              <div className="flex items-center gap-4">
+                <span className="text-white text-sm tabular-nums min-w-[60px] text-right">
+                  {new Date(position * 1000).toISOString().substr(11, 8)}
+                </span>
+                <Slider
+                  value={[Number.isFinite(position) ? position : 0]}
+                  max={Number.isFinite(duration) && duration > 0 ? duration : 100}
+                  step={1}
+                  className="flex-1"
+                  onValueCommit={async (v) => {
+                    const value = Array.isArray(v) ? v[0] : v
+                    await invoke("player_seek_absolute", { seconds: value })
+                  }}
+                />
+                <span className="text-white text-sm tabular-nums min-w-[60px]">
+                  {Number.isFinite(duration) && duration > 0
+                    ? new Date(duration * 1000).toISOString().substr(11, 8)
+                    : "--:--:--"}
+                </span>
+              </div>
+              <div className="flex items-center gap-3">
+                <Volume2 className="h-4 w-4 text-white/80" />
+                <Slider
+                  value={[volume]}
+                  max={100}
+                  step={1}
+                  className="w-56"
+                  onValueChange={async (v) => {
+                    const value = Array.isArray(v) ? v[0] : v
+                    setVolume(value as number)
+                    await invoke("player_set_volume", { volume: value })
+                  }}
+                />
+                <div className="flex-1" />
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={async () => {
+                    await invoke("player_stop")
+                    setSelectedStreamUrl(null)
+                    setPaused(false)
+                  }}
+                  className="text-white hover:bg-white/20 rounded-full px-3"
+                >
+                  <ArrowLeft className="h-4 w-4 mr-2" /> Back
+                </Button>
+              </div>
+            </div>
+          </div>
         </div>
       ) : (
         renderMovieContent()
